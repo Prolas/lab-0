@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "icmpv6.h": "c",
+        "tcp.h": "c",
+        "rewrite_helpers.h": "c"
+    }
+}

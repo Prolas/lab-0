@@ -3,7 +3,8 @@
 #include <linux/in.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
-
+#include <linux/udp.h>
+#include <linux/tcp.h>
 // The parsing helper functions from the packet01 lesson have moved here
 #include "../common/parsing_helpers.h"
 
@@ -16,30 +17,58 @@
  */
 static __always_inline int vlan_tag_pop(struct xdp_md *ctx, struct ethhdr *eth)
 {
-	/*
+
 	void *data_end = (void *)(long)ctx->data_end;
+	void *data = (void *)(long)ctx->data;
+
 	struct ethhdr eth_cpy;
 	struct vlan_hdr *vlh;
 	__be16 h_proto;
-	*/
+
 	int vlid = -1;
 
+	int hdrsize;
+	struct hdr_cursor nh;
+	nh.pos = data;
+
 	/* Check if there is a vlan tag to pop */
+	h_proto = eth_cpy.h_proto;
+	if (!proto_is_vlan(h_proto))
+		return -1;
 
 	/* Still need to do bounds checking */
 
+	hdrsize = sizeof(*vlh);
+	if (nh.pos + hdrsize > data_end)
+	{
+		return -1;
+	}
+
 	/* Save vlan ID for returning, h_proto for updating Ethernet header */
+	vlh = nh.pos;
+	h_proto = vlh->h_vlan_encapsulated_proto;
+	vlid = bpf_ntohs(vlh->h_vlan_TCI);
+	nh.pos += hdrsize;
 
 	/* Make a copy of the outer Ethernet header before we cut it off */
+	eth_cpy = *eth;
 
 	/* Actually adjust the head pointer */
+	if (bpf_xdp_adjust_head(ctx, (int)sizeof(*vlh)))
+		return -1;
 
 	/* Need to re-evaluate data *and* data_end and do new bounds checking
 	 * after adjusting head
 	 */
 
-	/* Copy back the old Ethernet header and update the proto type */
+	eth = nh.pos;
+	hdrsize = sizeof(*eth);
+	if (nh.pos + hdrsize > data_end)
+		return -1;
 
+	/* Copy back the old Ethernet header and update the proto type */
+	*eth = eth_cpy;
+	eth->h_proto = h_proto;
 
 	return vlid;
 }
@@ -48,8 +77,45 @@ static __always_inline int vlan_tag_pop(struct xdp_md *ctx, struct ethhdr *eth)
  * -1 on failure.
  */
 static __always_inline int vlan_tag_push(struct xdp_md *ctx,
-					 struct ethhdr *eth, int vlid)
+										 struct ethhdr *eth, int vlid)
 {
+	void *data_end = (void *)(long)ctx->data_end;
+
+	struct ethhdr eth_cpy;
+	struct vlan_hdr *vlh;
+
+	int hdrsize;
+	struct hdr_cursor nh;
+
+	eth_cpy = *eth;
+
+	hdrsize = sizeof(*vlh);
+	if (bpf_xdp_adjust_head(ctx, -hdrsize))
+		return -1;
+
+	data_end = (void *)(long)ctx->data_end;
+	nh.pos = (void *)(long)ctx->data;
+
+	hdrsize = sizeof(*eth);
+	if (nh.pos + hdrsize > data_end)
+		return -1;
+
+	eth = (void *)(long)ctx->data;
+	*eth = eth_cpy;
+
+	nh.pos += hdrsize;
+	hdrsize = sizeof(*vlh);
+	if (nh.pos + hdrsize > data_end)
+	{
+		return -1;
+	}
+
+	vlh = nh.pos;
+	vlh->h_vlan_TCI = bpf_htons(vlid);
+	vlh->h_vlan_encapsulated_proto = eth->h_proto;
+
+	eth->h_proto = bpf_htons(ETH_P_8021Q);
+
 	return 0;
 }
 
@@ -57,7 +123,72 @@ static __always_inline int vlan_tag_push(struct xdp_md *ctx,
 SEC("xdp")
 int xdp_port_rewrite_func(struct xdp_md *ctx)
 {
-	return XDP_PASS;
+	void *data_end = (void *)(long)ctx->data_end;
+	void *data = (void *)(long)ctx->data;
+
+	/* Default action XDP_PASS, imply everything we couldn't parse, or that
+	 * we don't want to deal with, we just pass up the stack and let the
+	 * kernel deal with it.
+	 */
+	__u32 action = XDP_PASS; /* Default action */
+
+	/* These keep track of the next header type and iterator pointer */
+	struct hdr_cursor nh;
+	int nh_type;
+	nh.pos = data;
+
+	struct ethhdr *eth;
+
+	/* Packet parsing in steps: Get each header one at a time, aborting if
+	 * parsing fails. Each helper function does sanity checking (is the
+	 * header type in the packet correct?), and bounds checking.
+	 */
+	nh_type = parse_ethhdr(&nh, data_end, &eth);
+
+	if (nh_type == bpf_htons(ETH_P_IPV6))
+	{
+		struct ipv6hdr *ip6h;
+
+		nh_type = parse_ip6hdr(&nh, data_end, &ip6h);
+	}
+	else if (nh_type == bpf_htons(ETH_P_IP))
+	{
+		struct iphdr *iph;
+
+		nh_type = parse_iphdr(&nh, data_end, &iph);
+	}
+	else if (nh_type < 0)
+	{
+		action = XDP_ABORTED;
+		goto out;
+	}
+	else
+	{
+		goto out;
+	}
+
+	if (nh_type == IPPROTO_TCP)
+	{
+		struct tcphdr *tcp = (struct tcphdr *)nh.pos;
+
+		int hdrsize = sizeof(*tcp);
+		if (nh.pos + hdrsize > data_end)
+			goto out;
+
+		tcp->dest = bpf_htons(bpf_ntohs(tcp->dest) - 1);
+	}
+	else if (nh_type == IPPROTO_UDP)
+	{
+		struct udphdr *udp = (struct udphdr *)nh.pos;
+
+		int hdrsize = sizeof(*udp);
+		if (nh.pos + hdrsize > data_end)
+			goto out;
+
+		udp->dest = bpf_htons(bpf_ntohs(udp->dest) - 1);
+	}
+out:
+	return xdp_stats_record_action(ctx, action);
 }
 
 /* VLAN swapper; will pop outermost VLAN tag if it exists, otherwise push a new
@@ -92,7 +223,7 @@ int xdp_vlan_swap_func(struct xdp_md *ctx)
  * IP (via the helpers in parsing_helpers.h).
  */
 SEC("xdp")
-int  xdp_parser_func(struct xdp_md *ctx)
+int default_xdp_parser_func(struct xdp_md *ctx)
 {
 	void *data_end = (void *)(long)ctx->data_end;
 	void *data = (void *)(long)ctx->data;
@@ -116,7 +247,8 @@ int  xdp_parser_func(struct xdp_md *ctx)
 	 */
 	nh_type = parse_ethhdr(&nh, data_end, &eth);
 
-	if (nh_type == bpf_htons(ETH_P_IPV6)) {
+	if (nh_type == bpf_htons(ETH_P_IPV6))
+	{
 		struct ipv6hdr *ip6h;
 		struct icmp6hdr *icmp6h;
 
@@ -130,8 +262,9 @@ int  xdp_parser_func(struct xdp_md *ctx)
 
 		if (bpf_ntohs(icmp6h->icmp6_sequence) % 2 == 0)
 			action = XDP_DROP;
-
-	} else if (nh_type == bpf_htons(ETH_P_IP)) {
+	}
+	else if (nh_type == bpf_htons(ETH_P_IP))
+	{
 		struct iphdr *iph;
 		struct icmphdr *icmph;
 
@@ -146,7 +279,7 @@ int  xdp_parser_func(struct xdp_md *ctx)
 		if (bpf_ntohs(icmph->un.echo.sequence) % 2 == 0)
 			action = XDP_DROP;
 	}
- out:
+out:
 	return xdp_stats_record_action(ctx, action);
 }
 

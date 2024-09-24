@@ -8,7 +8,8 @@
  * - Here an array with XDP_ACTION_MAX (max_)entries are created.
  * - The idea is to keep stats per (enum) xdp_action
  */
-struct {
+struct
+{
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__type(key, __u32);
 	__type(value, struct datarec);
@@ -19,14 +20,15 @@ struct {
  * instruction (that is BPF_STX | BPF_XADD | BPF_W for word sizes)
  */
 #ifndef lock_xadd
-#define lock_xadd(ptr, val)	((void) __sync_fetch_and_add(ptr, val))
+#define lock_xadd(ptr, val) ((void)__sync_fetch_and_add(ptr, val))
 #endif
 
 static __always_inline
-__u32 xdp_stats_record_action(struct xdp_md *ctx, __u32 action)
+	__u32
+	xdp_stats_record_action(struct xdp_md *ctx, __u32 action)
 {
 	void *data_end = (void *)(long)ctx->data_end;
-	void *data     = (void *)(long)ctx->data;
+	void *data = (void *)(long)ctx->data;
 
 	if (action >= XDP_ACTION_MAX)
 		return XDP_ABORTED;
@@ -50,7 +52,7 @@ __u32 xdp_stats_record_action(struct xdp_md *ctx, __u32 action)
 }
 
 SEC("xdp")
-int  xdp_pass_func(struct xdp_md *ctx)
+int xdp_pass_func(struct xdp_md *ctx)
 {
 	__u32 action = XDP_PASS; /* XDP_PASS = 2 */
 
@@ -58,7 +60,7 @@ int  xdp_pass_func(struct xdp_md *ctx)
 }
 
 SEC("xdp")
-int  xdp_drop_func(struct xdp_md *ctx)
+int xdp_drop_func(struct xdp_md *ctx)
 {
 	__u32 action = XDP_DROP;
 
@@ -66,7 +68,7 @@ int  xdp_drop_func(struct xdp_md *ctx)
 }
 
 SEC("xdp")
-int  xdp_abort_func(struct xdp_md *ctx)
+int xdp_abort_func(struct xdp_md *ctx)
 {
 	__u32 action = XDP_ABORTED;
 
