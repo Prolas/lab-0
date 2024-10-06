@@ -116,7 +116,7 @@ int pin_maps_in_bpf_object(struct bpf_object *bpf_obj, const char *subdir)
 	err = bpf_object__pin_maps(bpf_obj, pin_dir);
 	if (err)
 		return EXIT_FAIL_BPF;
-	
+
 	return 0;
 }
 
@@ -184,6 +184,14 @@ int main(int argc, char **argv)
 			fprintf(stderr, "ERR: pinning maps\n");
 			return err;
 		}
+	}
+	else
+	{
+		int pinned_map_fd = bpf_obj_get("/sys/fs/bpf/veth0/xdp_stats_map");
+		struct bpf_object *obj = bpf_object__open(cfg.filename);
+		struct bpf_map *map = bpf_object__find_map_by_name(obj, "xdp_stats_map");
+		bpf_map__reuse_fd(map, pinned_map_fd);
+		bpf_object__load(obj);
 	}
 
 	return EXIT_OK;

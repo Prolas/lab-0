@@ -200,7 +200,7 @@ int xdp_parser_func(struct xdp_md *ctx)
 		if (nh_type != ICMPV6_ECHO_REQUEST)
 			goto out;
 
-		if ((icmp6->icmp6_sequence % 2) == 0)
+		if ((bpf_ntohs(icmp6->icmp6_sequence) % 2) == 0)
 		{
 			action = XDP_DROP;
 		}

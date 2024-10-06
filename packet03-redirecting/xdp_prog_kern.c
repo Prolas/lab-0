@@ -39,6 +39,25 @@ struct
 	__uint(pinning, LIBBPF_PIN_BY_NAME);
 } redirect_params SEC(".maps");
 
+static __always_inline __u16 csum_fold_helper(__u32 csum)
+{
+	__u32 sum;
+	sum = (csum >> 16) + (csum & 0xffff);
+	sum += (sum >> 16);
+	return ~sum;
+}
+
+static __always_inline __u16 icmp_checksum_diff(
+	__u16 seed,
+	struct icmphdr_common *icmphdr_new,
+	struct icmphdr_common *icmphdr_old)
+{
+	__u32 csum, size = sizeof(struct icmphdr_common);
+
+	csum = bpf_csum_diff((__be32 *)icmphdr_old, size, (__be32 *)icmphdr_new, size, seed);
+	return csum_fold_helper(csum);
+}
+
 static __always_inline void swap_src_dst_mac(struct ethhdr *eth)
 {
 	/* Assignment 1: swap source and destination addresses in the eth.
@@ -138,7 +157,11 @@ int xdp_icmp_echo_func(struct xdp_md *ctx)
 	/* Assignment 1: patch the packet and update the checksum. You can use
 	 * the echo_reply variable defined above to fix the ICMP Type field. */
 
-	bpf_printk("echo_reply: %d", echo_reply);
+	__u16 old_cksum = icmphdr->cksum;
+	icmphdr->cksum = 0;
+	struct icmphdr_common icmphdr_old = *icmphdr;
+	icmphdr->type = echo_reply;
+	icmphdr->cksum = icmp_checksum_diff(~old_cksum, icmphdr, &icmphdr_old);
 
 	action = XDP_TX;
 
@@ -155,8 +178,8 @@ int xdp_redirect_func(struct xdp_md *ctx)
 	struct ethhdr *eth;
 	int eth_type;
 	int action = XDP_PASS;
-	unsigned char dst[ETH_ALEN] = {"5e:b3:"}; /* Assignment 2: fill in with the MAC address of the left inner interface */
-	unsigned ifindex = 2;					  /* Assignment 2: fill in with the ifindex of the left interface */
+	unsigned char dst[ETH_ALEN] = {22, 95, 11, 217, 46, 174}; /* Assignment 2: fill in with the MAC address of the left inner interface */
+	unsigned ifindex = 2;									  /* Assignment 2: fill in with the ifindex of the left interface */
 
 	/* These keep track of the next header type and iterator pointer */
 	nh.pos = data;

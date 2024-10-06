@@ -2,6 +2,8 @@
     "files.associations": {
         "icmpv6.h": "c",
         "tcp.h": "c",
-        "rewrite_helpers.h": "c"
+        "rewrite_helpers.h": "c",
+        "parsing_helpers.h": "c",
+        "bpf_helpers.h": "c"
     }
 }

@@ -113,7 +113,6 @@ static void stats_print(struct stats_record *stats_rec,
 
 		period = calc_period(rec, prev);
 
-
 		if (period == 0)
 			return;
 
@@ -288,7 +287,7 @@ static int stats_poll(int interval, char *pin_dir)
 	return EXIT_OK;
 }
 
-static void base_stats_poll(int map_fd, __u32 map_type, int interval)
+static void naive_stats_poll(int map_fd, __u32 map_type, int interval)
 {
 	struct stats_record prev, record = {0};
 
@@ -313,25 +312,6 @@ static void base_stats_poll(int map_fd, __u32 map_type, int interval)
 #endif
 
 const char *pin_basedir = "/sys/fs/bpf";
-
-/*
-int smart_stats_poll()
-{
-	struct bpf_map_info map_expect = {0};
-	struct bpf_map_info info = {0};
-	int stats_map_fd;
-
-	int interval = 2;
-	int err;
-
-	stats_map_fd = open_bpf_map_file(pin_dir, "xdp_stats_map", &info);
-	if (stats_map_fd < 0)
-	{
-		return EXIT_FAIL_BPF;
-	}
-
-}
-*/
 
 int base_main(int argc, char **argv)
 {
@@ -391,7 +371,7 @@ int base_main(int argc, char **argv)
 			   info.key_size, info.value_size, info.max_entries);
 	}
 
-	base_stats_poll(stats_map_fd, info.type, interval);
+	naive_stats_poll(stats_map_fd, info.type, interval);
 	return EXIT_OK;
 }
 

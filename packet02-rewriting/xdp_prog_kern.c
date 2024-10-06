@@ -145,6 +145,11 @@ int xdp_port_rewrite_func(struct xdp_md *ctx)
 	 */
 	nh_type = parse_ethhdr(&nh, data_end, &eth);
 
+	if (nh_type < 0)
+	{
+		goto out;
+	}
+
 	if (nh_type == bpf_htons(ETH_P_IPV6))
 	{
 		struct ipv6hdr *ip6h;
@@ -156,11 +161,6 @@ int xdp_port_rewrite_func(struct xdp_md *ctx)
 		struct iphdr *iph;
 
 		nh_type = parse_iphdr(&nh, data_end, &iph);
-	}
-	else if (nh_type < 0)
-	{
-		action = XDP_ABORTED;
-		goto out;
 	}
 	else
 	{
@@ -223,7 +223,7 @@ int xdp_vlan_swap_func(struct xdp_md *ctx)
  * IP (via the helpers in parsing_helpers.h).
  */
 SEC("xdp")
-int default_xdp_parser_func(struct xdp_md *ctx)
+int xdp_parser_func(struct xdp_md *ctx)
 {
 	void *data_end = (void *)(long)ctx->data_end;
 	void *data = (void *)(long)ctx->data;

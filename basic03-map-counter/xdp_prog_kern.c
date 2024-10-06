@@ -49,7 +49,6 @@ int xdp_stats1_func(struct xdp_md *ctx)
 	 */
 
 	__u64 bytes = data_end - data; /* Calculate packet length */
-	// printf("%d %d", data_end, data);
 	rec->rx_bytes += bytes;
 
 	/* Assignment #3 : Avoid the atomic operation
